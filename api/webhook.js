@@ -17,7 +17,7 @@ export default async function handler(req, res) {
   let reply = '';
 
   if (text === '/start') {
-    reply = 'Привет! Я DreamLine.ai. ИИ на основе новых технологий, давай поговорим, напиши мне.';
+    reply = 'Привет! Я DreamLine. ИИ на основе новых технологий, давай поговорим, напиши мне.';
   } else {
     reply = `Ты написал: ${text}`;
   }
