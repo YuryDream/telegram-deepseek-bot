@@ -191,7 +191,7 @@ export default async function handler(req, res) {
             'Authorization': `Bearer ${openrouterKey}`
           },
           body: JSON.stringify({
-            model: "deepseek/deepseek-r1-0528-qwen3-8b:free",
+            model: "gpt-3.5-turbo",
             messages: [{ role: 'user', content: message.text }]
           }),
           signal: controller.signal
