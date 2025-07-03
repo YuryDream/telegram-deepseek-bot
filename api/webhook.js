@@ -1,3 +1,7 @@
+import fetch from 'node-fetch';
+import * as Tesseract from 'tesseract.js';
+import FormData from 'form-data';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).send('Method Not Allowed');
