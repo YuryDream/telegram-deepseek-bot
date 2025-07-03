@@ -21,7 +21,6 @@ export default async function handler(req, res) {
     reply = 'Привет! Я DreamLine. ИИ на основе новых технологий, давай поговорим, напиши мне.';
   } else {
     try {
-      // Отправляем запрос к OpenRouter
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -29,7 +28,7 @@ export default async function handler(req, res) {
           'Authorization': `Bearer ${openrouterKey}`
         },
         body: JSON.stringify({
-          model: "gpt-3.5-turbo", // можно заменить на deepseek-chat, gpt-4, etc
+          model: "gpt-3.5-turbo", // или deepseek-chat, gpt-4, etc
           messages: [
             { role: 'user', content: text }
           ]
@@ -38,20 +37,22 @@ export default async function handler(req, res) {
 
       const data = await response.json();
 
-      if (data.choices && data.choices[0] && data.choices[0].message) {
+      if (data.choices && data.choices.length > 0 && data.choices[0].message) {
         reply = data.choices[0].message.content;
+      } else if (data.error) {
+        reply = `Ошибка ИИ: ${data.error.message}`;
+        console.error('Ошибка от OpenRouter:', data.error);
       } else {
-        reply = 'Произошла ошибка при получении ответа от ИИ.';
-        console.error('Invalid OpenRouter response:', data);
+        reply = 'Произошла неизвестная ошибка при получении ответа от ИИ.';
+        console.error('Неизвестный ответ OpenRouter:', data);
       }
 
     } catch (error) {
-      console.error('Ошибка OpenRouter:', error);
+      console.error('Ошибка при обращении к OpenRouter:', error);
       reply = 'Ошибка при обращении к ИИ.';
     }
   }
 
-  // Отправка ответа в Telegram
   const telegramUrl = `https://api.telegram.org/bot${token}/sendMessage`;
 
   try {
