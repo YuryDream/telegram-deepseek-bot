@@ -59,31 +59,45 @@ export default async function handler(req, res) {
     } else if (message.text) {
       // Другие команды и чат с ИИ...
 
-      // Здесь оставляем твой вызов OpenRouter
+      // Таймаут для запроса к OpenRouter
       const openrouterKey = process.env.OPENROUTER_API_KEY;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 7000); // 7 секунд
 
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${openrouterKey}`
-        },
-        body: JSON.stringify({
-          model: "deepseek/deepseek-r1-0528-qwen3-8b:free",
-          messages: [{ role: 'user', content: message.text }]
-        })
-      });
+      try {
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openrouterKey}`
+          },
+          body: JSON.stringify({
+            model: "deepseek/deepseek-r1-0528-qwen3-8b:free",
+            messages: [{ role: 'user', content: message.text }]
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
 
-      const data = await response.json();
+        const data = await response.json();
 
-      if (data.choices && data.choices.length > 0 && data.choices[0].message) {
-        reply = data.choices[0].message.content;
-      } else if (data.error) {
-        reply = `Ошибка ИИ: ${data.error.message}`;
-        console.error('OpenRouter error:', data.error);
-      } else {
-        reply = 'Неизвестная ошибка при получении ответа от ИИ.';
-        console.error('OpenRouter unknown response:', data);
+        if (data.choices && data.choices.length > 0 && data.choices[0].message) {
+          reply = data.choices[0].message.content;
+        } else if (data.error) {
+          reply = `Ошибка ИИ: ${data.error.message}`;
+          console.error('OpenRouter error:', data.error);
+        } else {
+          reply = 'Неизвестная ошибка при получении ответа от ИИ.';
+          console.error('OpenRouter unknown response:', data);
+        }
+      } catch (error) {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') {
+          reply = 'Превышено время ожидания ответа ИИ, попробуйте позже.';
+        } else {
+          reply = 'Ошибка при обращении к ИИ.';
+          console.error('Ошибка fetch OpenRouter:', error);
+        }
       }
     }
 
@@ -94,9 +108,12 @@ export default async function handler(req, res) {
       body: JSON.stringify({ chat_id: chatId, text: reply }),
     });
 
-    res.status(200).send('ok');
+    res.status(200)
+
+
+end('ok');
   } catch (error) {
     console.error('Ошибка webhook:', error);
     res.status(500).send('Internal Server Error');
   }
-}
+}.s
