@@ -1,3 +1,5 @@
+import Tesseract from 'tesseract.js';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).send('Method Not Allowed');
@@ -5,65 +7,61 @@ export default async function handler(req, res) {
 
   const { message } = req.body;
 
-  if (!message || !message.text) {
+  if (!message) {
     return res.status(200).send('No message');
   }
 
   const chatId = message.chat.id;
-  const text = message.text.trim();
-
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  const openrouterKey = process.env.OPENROUTER_API_KEY;
-
   let reply = '';
 
   try {
-    if (text.startsWith('/start')) {
-      reply = 'Привет! Я DreamLine. Напиши /help для списка команд.';
-    } else if (text.startsWith('/help')) {
+    if (message.text && message.text.startsWith('/start')) {
+      reply = 'Привет! Напиши /help для списка команд.';
+    } else if (message.text && message.text.startsWith('/help')) {
       reply = `
-Список команд:
+Команды:
 - /img <текст> — сгенерировать картинку
 - /photo2text — отправь фото после этой команды, я распознаю текст
 - /solve — отправь фото задачи после этой команды, я помогу решить
-- /start — приветствие
       `.trim();
-    } else if (text.startsWith('/img ')) {
-      // Генерация картинки
-      const prompt = text.slice(5).trim();
-      if (!prompt) {
-        reply = 'Пожалуйста, напиши описание для картинки после /img';
+    } else if (message.text && message.text.startsWith('/photo2text')) {
+      reply = 'Отправь фото после этой команды, я распознаю текст на нём.';
+    } else if (message.photo) {
+      // Пользователь прислал фото — проверим, была ли перед этим команда /photo2text
+      // Для простоты — будем считать, что любое фото мы распознаём
+
+      // Получаем file_id самого большого фото (последний в массиве)
+      const photoArray = message.photo;
+      const fileId = photoArray[photoArray.length - 1].file_id;
+
+      // Получаем ссылку на файл
+      const fileLinkRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
+      const fileLinkData = await fileLinkRes.json();
+
+      if (!fileLinkData.ok) {
+        reply = 'Не удалось получить файл.';
       } else {
-        // Вызов HuggingFace API для генерации картинки
-        const hfToken = process.env.HF_API_TOKEN;
-        const hfResponse = await fetch('https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${hfToken}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ inputs: prompt })
+        const filePath = fileLinkData.result.file_path;
+        const fileUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
+
+        // Скачиваем картинку
+        const imageResponse = await fetch(fileUrl);
+        const imageBuffer = await imageResponse.arrayBuffer();
+
+        // Распознаём текст с помощью Tesseract.js
+        const { data: { text } } = await Tesseract.recognize(Buffer.from(imageBuffer), 'rus+eng', {
+          logger: m => console.log(m), // можно убрать логи позже
         });
 
-        if (!hfResponse.ok) {
-          reply = 'Ошибка при генерации картинки.';
-          console.error('HuggingFace error:', await hfResponse.text());
-        } else {
-          const imageBuffer = await hfResponse.arrayBuffer();
-          // Чтобы отправить картинку, нужно использовать Telegram метод sendPhoto,
-          // но webhook.js обычно работает с sendMessage.
-          // Для упрощения отправим ссылку или предложим реализовать отправку фото отдельно.
-          reply = 'Картинка сгенерирована, но для отправки фото нужно доработать бота.';
-        }
+        reply = text.trim() || 'Текст не распознан, попробуй отправить фото более четко.';
       }
-    } else if (text.startsWith('/photo2text')) {
-      reply = 'Отправь фото после этой команды, чтобы распознать текст.';
-      // Реализовать обработку фото нужно в другом обработчике, здесь пока просто ответ
-    } else if (text.startsWith('/solve')) {
-      reply = 'Отправь фото задачи после этой команды, я попробую её решить.';
-      // Аналогично — нужна обработка фото
-    } else {
-      // Обработка обычного текста через OpenRouter Chat Completion
+    } else if (message.text) {
+      // Другие команды и чат с ИИ...
+
+      // Здесь оставляем твой вызов OpenRouter
+      const openrouterKey = process.env.OPENROUTER_API_KEY;
+
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -72,7 +70,7 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({
           model: "deepseek/deepseek-r1-0528-qwen3-8b:free",
-          messages: [{ role: 'user', content: text }]
+          messages: [{ role: 'user', content: message.text }]
         })
       });
 
@@ -89,18 +87,16 @@ export default async function handler(req, res) {
       }
     }
 
-    // Отправка ответа в Telegram
-    const telegramUrl = `https://api.telegram.org/bot${token}/sendMessage`;
-    await fetch(telegramUrl, {
+    // Отправляем ответ в Telegram
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text: reply }),
     });
 
-    return res.status(200).send('ok');
-
+    res.status(200).send('ok');
   } catch (error) {
-    console.error('Ошибка в обработчике webhook:', error);
-    return res.status(500).send('Internal Server Error');
+    console.error('Ошибка webhook:', error);
+    res.status(500).send('Internal Server Error');
   }
 }
