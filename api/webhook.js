@@ -1,7 +1,3 @@
-import fetch from 'node-fetch';
-import * as Tesseract from 'tesseract.js';
-import FormData from 'form-data';
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).send('Method Not Allowed');
@@ -14,17 +10,60 @@ export default async function handler(req, res) {
   }
 
   const chatId = message.chat.id;
-  const text = message.text;
+  const text = message.text.trim();
 
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const openrouterKey = process.env.OPENROUTER_API_KEY;
 
   let reply = '';
 
-  if (text === '/start') {
-    reply = 'Привет! Я DreamLine. ИИ на основе новых технологий, давай поговорим, напиши мне.';
-  } else {
-    try {
+  try {
+    if (text.startsWith('/start')) {
+      reply = 'Привет! Я DreamLine. Напиши /help для списка команд.';
+    } else if (text.startsWith('/help')) {
+      reply = `
+Список команд:
+- /img <текст> — сгенерировать картинку
+- /photo2text — отправь фото после этой команды, я распознаю текст
+- /solve — отправь фото задачи после этой команды, я помогу решить
+- /start — приветствие
+      `.trim();
+    } else if (text.startsWith('/img ')) {
+      // Генерация картинки
+      const prompt = text.slice(5).trim();
+      if (!prompt) {
+        reply = 'Пожалуйста, напиши описание для картинки после /img';
+      } else {
+        // Вызов HuggingFace API для генерации картинки
+        const hfToken = process.env.HF_API_TOKEN;
+        const hfResponse = await fetch('https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${hfToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ inputs: prompt })
+        });
+
+        if (!hfResponse.ok) {
+          reply = 'Ошибка при генерации картинки.';
+          console.error('HuggingFace error:', await hfResponse.text());
+        } else {
+          const imageBuffer = await hfResponse.arrayBuffer();
+          // Чтобы отправить картинку, нужно использовать Telegram метод sendPhoto,
+          // но webhook.js обычно работает с sendMessage.
+          // Для упрощения отправим ссылку или предложим реализовать отправку фото отдельно.
+          reply = 'Картинка сгенерирована, но для отправки фото нужно доработать бота.';
+        }
+      }
+    } else if (text.startsWith('/photo2text')) {
+      reply = 'Отправь фото после этой команды, чтобы распознать текст.';
+      // Реализовать обработку фото нужно в другом обработчике, здесь пока просто ответ
+    } else if (text.startsWith('/solve')) {
+      reply = 'Отправь фото задачи после этой команды, я попробую её решить.';
+      // Аналогично — нужна обработка фото
+    } else {
+      // Обработка обычного текста через OpenRouter Chat Completion
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -32,10 +71,8 @@ export default async function handler(req, res) {
           'Authorization': `Bearer ${openrouterKey}`
         },
         body: JSON.stringify({
-          model: "deepseek/deepseek-r1-0528-qwen3-8b:free", // или deepseek-chat, gpt-4, etc
-          messages: [
-            { role: 'user', content: text }
-          ]
+          model: "deepseek/deepseek-r1-0528-qwen3-8b:free",
+          messages: [{ role: 'user', content: text }]
         })
       });
 
@@ -45,29 +82,25 @@ export default async function handler(req, res) {
         reply = data.choices[0].message.content;
       } else if (data.error) {
         reply = `Ошибка ИИ: ${data.error.message}`;
-        console.error('Ошибка от OpenRouter:', data.error);
+        console.error('OpenRouter error:', data.error);
       } else {
-        reply = 'Произошла неизвестная ошибка при получении ответа от ИИ.';
-        console.error('Неизвестный ответ OpenRouter:', data);
+        reply = 'Неизвестная ошибка при получении ответа от ИИ.';
+        console.error('OpenRouter unknown response:', data);
       }
-
-    } catch (error) {
-      console.error('Ошибка при обращении к OpenRouter:', error);
-      reply = 'Ошибка при обращении к ИИ.';
     }
-  }
 
-  const telegramUrl = `https://api.telegram.org/bot${token}/sendMessage`;
-
-  try {
+    // Отправка ответа в Telegram
+    const telegramUrl = `https://api.telegram.org/bot${token}/sendMessage`;
     await fetch(telegramUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text: reply }),
     });
-    res.status(200).send('ok');
+
+    return res.status(200).send('ok');
+
   } catch (error) {
-    console.error('Ошибка отправки сообщения в Telegram:', error);
-    res.status(500).send('Error sending message');
+    console.error('Ошибка в обработчике webhook:', error);
+    return res.status(500).send('Internal Server Error');
   }
 }
