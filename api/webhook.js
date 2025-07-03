@@ -28,7 +28,7 @@ export default async function handler(req, res) {
           'Authorization': `Bearer ${openrouterKey}`
         },
         body: JSON.stringify({
-          model: "deepseek-ai/deepseek-chat", // или deepseek-chat, gpt-4, etc
+          model: "openchat/openchat-3.5", // или deepseek-chat, gpt-4, etc
           messages: [
             { role: 'user', content: text }
           ]
