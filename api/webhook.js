@@ -32,7 +32,7 @@ export default async function handler(req, res) {
           'Authorization': `Bearer ${openrouterKey}`
         },
         body: JSON.stringify({
-          model: "openai/gpt-4-1106-preview", // или deepseek-chat, gpt-4, etc
+          model: "deepseek/deepseek-r1-0528-qwen3-8b:free", // или deepseek-chat, gpt-4, etc
           messages: [
             { role: 'user', content: text }
           ]
