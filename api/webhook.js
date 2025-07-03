@@ -1,6 +1,6 @@
 import Tesseract from 'tesseract.js';
 
-const userStates = {}; // simple in-memory, для демо
+const userStates = {}; // простой in-memory, для демо
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -38,14 +38,13 @@ export default async function handler(req, res) {
       reply = 'Отправь фото задачи после этой команды, я постараюсь помочь её решить.';
     } else if (message.text && message.text.startsWith('/img ')) {
       userStates[userId] = null;
-      // --- обработка /img из предыдущего шага ---
       const prompt = message.text.slice(5).trim();
       if (!prompt) {
         reply = 'Пожалуйста, укажи описание картинки после команды /img';
       } else {
         const openrouterKey = process.env.OPENROUTER_API_KEY;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
 
         try {
           const response = await fetch('https://openrouter.ai/api/v1/images/generations', {
@@ -98,6 +97,7 @@ export default async function handler(req, res) {
       const photoArray = message.photo;
       const fileId = photoArray[photoArray.length - 1].file_id;
 
+      // Получаем ссылку на файл
       const fileLinkRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
       const fileLinkData = await fileLinkRes.json();
 
@@ -107,34 +107,77 @@ export default async function handler(req, res) {
         const filePath = fileLinkData.result.file_path;
         const fileUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
 
+        // Загружаем файл в память
         const imageResponse = await fetch(fileUrl);
         const imageBuffer = await imageResponse.arrayBuffer();
 
         if (state === 'photo2text' || state === 'solve') {
           // Распознаём текст через Tesseract
           const { data: { text } } = await Tesseract.recognize(Buffer.from(imageBuffer), 'rus+eng', {
-            logger: m => console.log(m),
+            logger: m => console.log('Tesseract:', m),
           });
 
           if (!text.trim()) {
             reply = 'Текст не распознан, попробуй отправить фото более четко.';
           } else {
             if (state === 'solve') {
-              // Здесь можно добавить вызов ИИ для решения, пока просто отправим текст
-              reply = `Распознанный текст задачи:\n\n${text.trim()}\n\n(Решение скоро добавим!)`;
+              // Вызываем OpenRouter для решения задачи
+              const openrouterKey = process.env.OPENROUTER_API_KEY;
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+              try {
+                const solveResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${openrouterKey}`
+                  },
+                  body: JSON.stringify({
+                    model: "deepseek/deepseek-r1-0528-qwen3-8b:free",
+                    messages: [
+                      { role: "system", content: "Ты - помощник, который решает математические и логические задачи." },
+                      { role: "user", content: `Реши эту задачу:\n\n${text.trim()}` }
+                    ]
+                  }),
+                  signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                const solveData = await solveResponse.json();
+
+                if (solveData.choices && solveData.choices.length > 0 && solveData.choices[0].message) {
+                  reply = `Распознанный текст задачи:\n\n${text.trim()}\n\nРешение:\n${solveData.choices[0].message.content}`;
+                } else if (solveData.error) {
+                  reply = `Ошибка при решении задачи: ${solveData.error.message}`;
+                  console.error('OpenRouter solve error:', solveData.error);
+                } else {
+                  reply = 'Не удалось получить решение задачи от ИИ.';
+                  console.error('OpenRouter unknown solve response:', solveData);
+                }
+              } catch (error) {
+                clearTimeout(timeoutId);
+                if (error.name === 'AbortError') {
+                  reply = 'Превышено время ожидания ответа ИИ, попробуйте позже.';
+                } else {
+                  reply = 'Ошибка при обращении к ИИ для решения задачи.';
+                  console.error('Ошибка fetch OpenRouter solve:', error);
+                }
+              }
             } else {
               reply = text.trim();
             }
           }
 
-          userStates[userId] = null; // сброс после обработки
+          userStates[userId] = null; // сброс состояния после обработки
         } else {
           reply = 'Я не понимаю, зачем ты отправил это фото. Напиши /help для списка команд.';
         }
       }
     } else if (message.text) {
       userStates[userId] = null;
-      // Чат с ИИ
+      // Чат с ИИ по любому другому тексту
 
       const openrouterKey = process.env.OPENROUTER_API_KEY;
       const controller = new AbortController();
